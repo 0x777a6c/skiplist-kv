@@ -1,3 +1,10 @@
+// - 实现基本的插入、删除、查找功能；可以dump和load，支持服务快速重启
+// - 实现一个基于skiplist的简易版内存kv服务，从磁盘中逐行读取数据，
+//   对skiplist内进行增删改；同时接收请求进行多线程并发读操作，假定所
+//   有读操作执行时间绝不会超过2s(加分项：该场景可以不使用任何锁实现)
+//   需保证写时读的一致性，即在进行写时，读线程不能访问写的那块内存
+
+
 #ifndef SKIPLIST_H
 #define SKIPLIST_H
 
@@ -8,7 +15,18 @@
 #include <fstream>
 #include <vector>
 
+enum Status{
+    FAIL = -1,
+    OK = 1
+};
 
+// requirements：
+// 1. Key 对 operator<, operator==, operator> 有相应的重载
+// 分别意为严格小于, 相等, 严格大于
+// 2. 对于 Key/Value(以下使用T代指 Key/Value), 分别存在以下的两个的友元函数：
+// ifstream& operator>>(ifstream& fin, T& t);
+// ofstream& operator<<(ofstream& fout, T& t);
+// 分别意为从 fin 写入与向 fout 写出
 template <typename Key, typename Value, class Comparator>
 class Skiplist
 {
@@ -65,14 +83,14 @@ public:
         delete head;
     }
 
-    void insert(const Key& key, const Value& value) {
+    Status insert(const Key& key, const Value& value) {
         int height = get_random_height();
         Node* prev[max_height] = {nullptr};
 
         Node* x = find_greater_or_equal(key, prev);
         if(x != nullptr && Equal(x->key, key)) {
             std::cerr << "The key existed, please use update." << std::endl;
-            return;
+            return FAIL;
         }
 
         if(height > cur_height){
@@ -87,14 +105,16 @@ public:
             insert_node->set_next(i, prev[i]->get_next(i));
             prev[i]->set_next(i, insert_node);
         }
+
+        return OK;
     }
 
-    void del(const Key& key) {
+    Status del(const Key& key) {
         Node* prev[max_height] = {nullptr};
         Node* x = find_greater_or_equal(key, prev);
         if(x == nullptr || !Equal(x->key, key)) {
             std::cerr << "The key doesn't exist, delete failed." << std::endl;
-            return;
+            return FAIL;
         }
 
         for(int i = 0; i < max_height; ++i) {
@@ -103,56 +123,66 @@ public:
             }
         }
         delete x;
+        return OK;
     }
 
-    void update(const Key& key, const Value& value) {
+    Status update(const Key& key, const Value& value) {
         Node* x = find_greater_or_equal(key, nullptr);
         if(x == nullptr || !Equal(x->key, key)) {
             std::cerr << "The key doesn't exist, please use insert." << std::endl;
-            return;
+            return FAIL;
         }
 
         x->set_value(value);
+        return OK;
     }
 
-    const Value get(const Key& key) {
+    Status get(const Key& key, Value& value) {
         Node* x = find_greater_or_equal(key, nullptr);
         if(x == nullptr || !Equal(x->key, key)) {
             std::cerr << "The key doesn't exist, get failed." << std::endl;
-            return Value();
+            return FAIL;
         }
 
-        return x->get_value();
+        value = x->get_value();
+        return OK;
     }
 
-    void dump() {
-        file_writer.open(dump_file_path, std::ios::app);
+    Status dump() {
+        file_writer.open(dump_file_path, std::ios::out);
         if(!file_writer.is_open()) {
             std::cerr << "cannot open the file." << std::endl;
-            return;
+            return FAIL;
         }
 
         Node* cur = head->get_next(0);
         while(cur != nullptr){
-            file_writer << cur->key << dump_delimiter << cur->get_value() << "\n";
-            cur = cur->get_next(1);
+            file_writer << cur->key << " " << dump_delimiter << " " << cur->get_value() << "\n";
+            cur = cur->get_next(0);
         }
 
         file_writer.close();
+
+        return OK;
     }
 
-    void load() {
+    Status load() {
         file_reader.open(dump_file_path, std::ios::in);
         if(!file_reader.is_open()) {
             std::cerr << "cannot open the file." << std::endl;
-            return;
+            return FAIL;
         }
 
-        std::string line, key, value;
-        while(std::getline(file_reader, line)) {
-            get_key_and_value_from_line(line, key, value);
-            insert(key, value);
+        Key key;
+        Value value;
+        std::string placeholder;
+        while(file_reader >> key >> placeholder >> value) {
+            if(insert(key, value) == FAIL) update(key, value);
         }
+
+        file_reader.close();
+
+        return OK;
     }
 
 private:
@@ -210,23 +240,6 @@ private:
     bool Equal(const Key& key_1, const Key& key_2) {
         if(cmp(key_1, key_2) == 0) return true;
         return false;
-    }
-
-    bool is_valid_line(const std::string& line) {
-        if(line.empty()) return false;
-        if(line.find(dump_delimiter) == std::string::npos) return false;
-        return true;
-    }
-
-    void get_key_and_value_from_line (const std::string& line, std::string& key, std::string& value) {
-        if(!is_valid_line(line)) {
-            key = std::string();
-            value = std::string();
-            return;
-        }
-
-        key = line.substr(0, line.find(dump_delimiter));
-        value = line.substr(line.find(dump_delimiter)+1);
     }
 };
 

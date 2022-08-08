@@ -34,14 +34,15 @@ unordered_map<string, int> ops_table = {
 
 
 int main() {
-    Comparator<string> cmp;
-    Skiplist<string, string, Comparator<string>> sl(cmp);
+    Comparator<int> cmp;
+    Skiplist<int, string, Comparator<int>> sl(cmp);
 
     string op;
     while (true) {
         cin >> op;
 
-        string key, value;
+        int key;
+        string value;
         switch (ops_table[op])
         {
         case INSERT:
@@ -61,8 +62,7 @@ int main() {
 
         case GET:
             cin >> key;
-            value = sl.get(key);
-            if(!value.empty()) cout << key << ":" << value << endl;
+            if(sl.get(key, value) == OK) cout << key << ":" << value << endl;
             break;  
 
         case DUMP:
